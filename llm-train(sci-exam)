@@ -1,0 +1,67 @@
+import pandas as pd
+import torch
+from transformers import BertTokenizer, BertForSequenceClassification
+from transformers import AutoModel, AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForMultipleChoice
+
+import pandas as pd
+import torch
+from transformers import BertForSequenceClassification
+from transformers import BertForMultipleChoice, BertTokenizer
+from transformers import BertForQuestionAnswering
+import transformers
+from transformers import AdamW
+from torch.nn import CrossEntropyLoss
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+dft = pd.read_csv('/kaggle/input/kaggle-llm-science-exam/train.csv')
+
+model_name = "allenai/scibert_scivocab_uncased"
+model = AutoModelForMultipleChoice.from_pretrained('/kaggle/input/bertmodel2')
+tokenizer = AutoTokenizer.from_pretrained('/kaggle/input/tokenize')
+
+# オプティマイザーの設定
+optimizer = AdamW(model.parameters(), lr=1e-5)
+
+# 損失関数の設定
+loss_fn = CrossEntropyLoss()
+
+# 訓練データの長さ
+n = len(dft['prompt'])
+
+for epoch in range(10):  # エポック数は適宜調整してください
+    total_loss = 0
+
+    for a in range(n):
+        prompt = dft.iloc[a]['prompt']
+        choices = ["A", "B", "C", "D", "E"]
+        choice_texts = dft.iloc[a][choices].values.tolist()
+
+        # 入力データとラベルのエンコード
+        encoded = tokenizer([prompt]*5, choice_texts, padding=True, return_tensors='pt', truncation=True, max_length=512)
+        input_ids = encoded['input_ids'].view(1, 5, -1)
+        attention_mask = encoded['attention_mask'].view(1, 5, -1)
+        labels = torch.tensor([choices.index(dft.iloc[a]['answer'])])  # 'answer'カラムから正解ラベルを取得
+
+        # 勾配をゼロに初期化
+        optimizer.zero_grad()
+
+        # フォワードパス
+        outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+        loss = outputs.loss
+
+        # バックワードパスとパラメータ更新
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    #print(f"Epoch {epoch+1}, Loss: {total_loss/n}")
+
+# モデルとトークナイザーの保存
+tokenizer.save_pretrained('/kaggle/working/')
+model.save_pretrained("/kaggle/working/")
+
+df = pd.read_csv("/kaggle/input/kaggle-llm-science-exam/train.csv")
+!pip install transformers                      
