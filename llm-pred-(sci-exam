@@ -1,0 +1,52 @@
+import pandas as pd
+import torch
+from transformers import BertTokenizer, BertForSequenceClassification
+from transformers import AutoModel, AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForMultipleChoice
+
+import pandas as pd
+import torch
+from transformers import BertForSequenceClassification
+from transformers import BertForMultipleChoice, BertTokenizer
+from transformers import BertForQuestionAnswering
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+df = pd.read_csv('/kaggle/input/kaggle-llm-science-exam/test.csv')
+
+list_a = []
+model_name = "allenai/scibert_scivocab_uncased"
+model = AutoModelForMultipleChoice.from_pretrained('/kaggle/input/berttrain')
+tokenizer = AutoTokenizer.from_pretrained('/kaggle/input/tokenizetrain')
+
+
+for a in range(len(df['prompt'])):
+    prompt = df.iloc[a]['prompt']
+    choices = ["A", "B", "C", "D", "E"]
+    choice_texts = df.iloc[a][choices].values.tolist()
+
+    encoded = tokenizer([prompt]*5, choice_texts, padding=True, return_tensors='pt', truncation=True, max_length=512)
+    input_ids = encoded['input_ids'].view(1, 5, -1)
+    attention_mask = encoded['attention_mask'].view(1, 5, -1)
+
+    with torch.no_grad():
+        outputs = model(input_ids, attention_mask=attention_mask)
+    logits = outputs.logits
+
+    # 上位k個の選択肢を取得
+    k = 3  # 取得したい選択肢の数
+    topk_values, topk_indices = torch.topk(logits, k)
+    
+    # logitsと選択肢を一緒にソート
+    sorted_indices = torch.argsort(logits, descending=True)
+    sorted_choices = [choices[index] for index in sorted_indices[0]]
+
+# 上位k個の選択肢を取得
+    top_choices = sorted_choices[:k]
+    list_a.append(top_choices)
+
+df['prediction']= list_a
+submission = df[['id', 'prediction']]
+submission['prediction'] = submission['prediction'].apply(lambda x: ' '.join(map(str, x)))
+submission.to_csv('submission.csv', index=False)
+
+pd.read_csv('submission.csv').head(20)
