@@ -1,0 +1,122 @@
+import torch
+import torch.nn as nn
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler
+import optuna
+# データの読み込みと前処理
+test = pd.read_csv('/kaggle/input/open-problems-single-cell-perturbations/id_map.csv')
+df = pd.read_parquet('/kaggle/input/open-problems-single-cell-perturbations/de_train.parquet')
+df = df[df['sm_name'] != 'Porcn I']
+#df = df[df['sm_name'].isin(test['sm_name'])]
+xlist  = ['cell_type','sm_name']#['sm_name']#['cell_type','sm_name']
+_ylist = ['cell_type','sm_name','sm_lincs_id','SMILES','control']
+train = pd.get_dummies(df[xlist], columns=xlist)
+test = pd.get_dummies(test[xlist], columns=xlist)
+uncommon = [f for f in train if f not in test]
+X = train.drop(columns=uncommon)
+y = df.drop(columns=_ylist)
+#scaler = StandardScaler()
+#X = scaler.fit_transform(X)
+#y = scaler.fit_transform(y)
+# PyTorchのデータセットとデータローダーの作成
+class MyDataset(Dataset):
+    def __init__(self, X_data, y_data=None):
+        self.X_data = X_data
+        self.y_data = y_data
+        
+    def __getitem__(self, index):
+        if self.y_data is not None:
+            return self.X_data[index], self.y_data[index]
+        else:
+            return self.X_data[index]
+        
+    def __len__ (self):
+        return len(self.X_data)
+
+train_data = MyDataset(torch.FloatTensor(X.values), torch.FloatTensor(y.values))
+test_data = MyDataset(torch.FloatTensor(test.values))
+
+train_loader = DataLoader(dataset=train_data, batch_size=32, shuffle=True)
+test_loader = DataLoader(dataset=test_data, batch_size=1)
+
+from sklearn.model_selection import StratifiedKFold
+import numpy as np
+
+import optuna
+
+def objective(trial):
+    # Optunaで探索するパラメータの設定
+    lr = trial.suggest_loguniform('lr', 1e-5, 1e-1)
+    #hidden_units = trial.suggest_int('hidden_units', 10, 100)
+    hidden_units1 = trial.suggest_int('hidden_units1', 10, 100)
+    hidden_units2 =   trial.suggest_int('hidden_units2', 10, 100)
+    hidden_units3 =   trial.suggest_int('hidden_units3', 10, 100)
+    hidden_units4 =   trial.suggest_int('hidden_units4', 10, 100)
+    hidden_units5 =   trial.suggest_int('hidden_units5', 10, 100)
+    hidden_units6 =   trial.suggest_int('hidden_units6', 10, 100)
+
+    # ネットワークの定義
+    class Net(nn.Module):
+        def __init__(self):
+            super(Net, self).__init__()
+            self.fc1 = nn.Linear(X.shape[1], hidden_units1)
+            self.fc2 = nn.Linear(hidden_units1, hidden_units2)
+            self.fc3 = nn.Linear(hidden_units2, hidden_units3)
+            self.fc4 = nn.Linear(hidden_units3, hidden_units4)
+            self.fc5 = nn.Linear(hidden_units4, hidden_units5)
+            self.fc6 = nn.Linear(hidden_units5, hidden_units6)
+            self.fc7 = nn.Linear(hidden_units6, y.shape[1])
+
+        def forward(self, x):
+            x = torch.relu(self.fc1(x))
+            x = torch.relu(self.fc2(x))
+            x = torch.relu(self.fc3(x))
+            x = torch.relu(self.fc4(x))
+            x = torch.relu(self.fc5(x))
+            x = torch.relu(self.fc6(x))
+            x = self.fc7(x)
+            return x
+
+    # モデルのインスタンス化
+    model = Net()
+
+    # 損失関数と最適化手法の定義
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    # 学習
+    for epoch in range(100):
+        for i, (inputs, labels) in enumerate(train_loader):
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+    # テストデータで予測
+    model.eval()
+    predictions = []
+    with torch.no_grad():
+        for i, inputs in enumerate(test_loader):
+            outputs = model(inputs)
+            predictions.append(outputs.numpy())
+
+    # 予測結果を2次元に変換
+    predictions = np.array(predictions).reshape(len(predictions), -1)
+
+    # 予測結果をデータフレームに変換
+    df_predictions = pd.DataFrame(predictions, columns=y.columns,index=test.index)
+    df_predictions.index.name = 'id'
+
+    # 予測結果の評価（ここではMSEを使用）
+    mse = ((df_predictions - y) ** 2).mean().mean()
+
+    return mse
+
+# Optunaでの最適化の実行
+study = optuna.create_study(direction='minimize')
+study.optimize(objective, n_trials=40)
+
+# 最適なパラメータの表示
+print(study.best_params)
