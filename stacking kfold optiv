@@ -1,0 +1,263 @@
+import os, sys
+import datetime
+import warnings
+warnings.filterwarnings('ignore')
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestRegressor 
+from sklearn.ensemble import GradientBoostingRegressor 
+from sklearn.ensemble import ExtraTreesRegressor 
+from sklearn.neighbors import KNeighborsRegressor 
+
+import xgboost as xgb
+from xgboost import XGBRegressor
+
+import torch
+import torch.nn as nn
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold
+from sklearn.model_selection import cross_val_score
+def feature_cols(df) :
+    cols = [c for c in df.columns if c not in ['row_id', 'time_id', 'date_id','far_price','near_price']]
+    df = df[cols]    
+    return df
+train = pd.read_csv('../input/optiver-trading-at-the-close/train.csv')
+test = pd.read_csv('../input/optiver-trading-at-the-close/example_test_files/test.csv')
+sample_sub = pd.read_csv('../input/optiver-trading-at-the-close/example_test_files/sample_submission.csv')
+X_train = feature_cols(train.drop(columns='target'))
+X_train=X_train.fillna(0.0).copy()
+y_train = train['target'].fillna(0.0).copy()
+X_test = feature_cols(test.drop(columns='currently_scored',axis=1))
+
+X_train = X_train.values
+X_test = X_test.values
+class ClfBuilder(object):
+    def __init__(self, clf, params=None):
+        self.clf = clf(**params)
+
+    def fit(self, X, y):
+        self.clf.fit(X, y)
+
+    def predict(self, X):
+        return self.clf.predict(X)
+
+    #def predict_proba(self, X):
+        #return self.clf.predict_proba(X)
+from sklearn.model_selection import KFold
+
+def get_base_model_preds(clf, X_train, y_train, X_test):
+    print(clf.clf)
+
+    N_SPLITS = 5
+    oof_valid = np.zeros(X_train.shape[0])
+    oof_test = np.zeros(X_test.shape[0])
+    oof_test_skf = np.empty((N_SPLITS, X_test.shape[0]))
+
+    kf = KFold(n_splits=N_SPLITS)
+    for i, (train_index, valid_index) in enumerate(kf.split(X_train)):
+        print('[CV] {}/{}'.format(i+1, N_SPLITS))
+        X_train_, X_valid_ = X_train[train_index], X_train[valid_index]
+        y_train_, y_valid_ = y_train[train_index], y_train[valid_index]
+
+        clf.fit(X_train_, y_train_)
+
+        oof_valid[valid_index] = clf.predict(X_valid_)
+        oof_test_skf[i, :] = clf.predict(X_test)
+
+    oof_test[:] = oof_test_skf.mean(axis=0)
+    return oof_valid, oof_test
+rfc_params = {
+    'n_estimators': 100, 
+    'max_depth': 10, 
+    'random_state': 0, 
+}
+gbc_params = {
+    'n_estimators': 50, 
+    'max_depth': 10, 
+    'random_state': 0, 
+}
+etc_params = {
+    'n_estimators': 100, 
+    'max_depth': 10,
+    'random_state': 0, 
+}
+xgbc1_params = {
+    'n_estimators': 100, 
+    'max_depth': 10,
+    'random_state': 0, 
+}
+knn1_params = {'n_neighbors': 4}
+knn2_params = {'n_neighbors': 8}
+knn3_params = {'n_neighbors': 16}
+knn4_params = {'n_neighbors': 32}
+rfc = ClfBuilder(clf=RandomForestRegressor, params=rfc_params)
+gbc = ClfBuilder(clf=GradientBoostingRegressor , params=gbc_params)
+etc = ClfBuilder(clf=ExtraTreesRegressor , params=etc_params)
+xgbc1 = ClfBuilder(clf=XGBRegressor, params=xgbc1_params)
+knn1 = ClfBuilder(clf=KNeighborsRegressor , params=knn1_params)
+knn2 = ClfBuilder(clf=KNeighborsRegressor , params=knn2_params)
+knn3 = ClfBuilder(clf=KNeighborsRegressor , params=knn3_params)
+knn4 = ClfBuilder(clf=KNeighborsRegressor , params=knn4_params)
+'''xgbc2_params = {
+    'n_eetimators': 100, 
+    'max_depth': 5, 
+    'random_state': 42, 
+}
+xgbc2 = XGBRegressor(**xgbc2_params)
+nan_count = y_train.isnull().sum()
+print(nan_count)'''
+class MyDataset(Dataset):
+    def __init__(self, X_data, y_data=None):
+        self.X_data = X_data
+        self.y_data = y_data
+        
+    def __getitem__(self, index):
+        if self.y_data is not None:
+            return self.X_data[index], self.y_data[index]
+        else:
+            return self.X_data[index]
+        
+    def __len__ (self):
+        return len(self.X_data)
+
+#train_data = MyDataset(torch.FloatTensor(X.values), torch.FloatTensor(y.values))
+#test_data = MyDataset(torch.FloatTensor(test.values.astype(np.float32)))
+
+#train_loader = DataLoader(dataset=train_data, batch_size=2048, shuffle=True)
+#test_loader = DataLoader(dataset=test_data, batch_size=1)
+
+# ネットワークの定義
+'''class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(X.shape[1], 50)
+        self.fc2 = nn.Linear(50, 1)
+        
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x'''
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(X.shape[1], 200)
+        self.fc2 = nn.Linear(200, 100)
+        self.fc3 = nn.Linear(100, 300)
+        self.fc4 = nn.Linear(300, 500)
+        self.fc5 = nn.Linear(500, 1000)
+        self.fc6 = nn.Linear(1000, 300)
+        self.fc7 = nn.Linear(300, 1)  # y.shape[1]を18211に変更
+        
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = torch.relu(self.fc3(x))
+        x = torch.relu(self.fc4(x))
+        x = torch.relu(self.fc5(x))
+        x = torch.relu(self.fc6(x))
+        x = self.fc7(x)
+        
+        return x
+# モデルのインスタンス化
+''''model = Net()
+
+# 損失関数と最適化手法の定義
+criterion = nn.L1Loss()
+optimizer = torch.optim.Adam(model.parameters(), lr= 0.01)
+
+# 学習
+for epoch in range(2):
+    for i, (inputs, labels) in enumerate(train_loader):
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()'''
+"'model = Net()\n\n# 損失関数と最適化手法の定義\ncriterion = nn.L1Loss()\noptimizer = torch.optim.Adam(model.parameters(), lr= 0.01)\n\n# 学習\nfor epoch in range(2):\n    for i, (inputs, labels) in enumerate(train_loader):\n        optimizer.zero_grad()\n        outputs = model(inputs)\n        loss = criterion(outputs, labels)\n        loss.backward()\n        optimizer.step()"
+def pred(test,model):
+    #test_data = MyDataset(torch.FloatTensor(test.values.astype(np.float32)))
+    #test_loader = DataLoader(dataset=test_data, batch_size=32)
+
+    model.eval()
+    #predictions = []
+    with torch.no_grad():
+        pre=model(test)
+        #for i, inputs in enumerate(test_loader):
+            #outputs = model(inputs)
+            #predictions.append(outputs.numpy())
+            
+    #predictions = np.concatenate(predictions, axis=0)
+    #predictions = predictions.flatten()
+
+                
+    return pre.detach().numpy().flatten()
+
+    
+import optiver2023
+optiver2023.make_env.func_dict['__called__'] = False
+env = optiver2023.make_env()
+iter_test = env.iter_test()
+
+for (test, revealed_targets, sample_prediction) in iter_test:
+    test_df = feature_cols(test)
+    X_test=test_df.drop(columns='currently_scored',axis=1)
+    test_df.fillna(0.0)
+    X_test=X_test.iloc[-len(X_test):, :]
+    oof_valid_rfc, oof_test_rfc = get_base_model_preds(rfc, X_train, y_train, X_test)
+    oof_valid_gbc, oof_test_gbc = get_base_model_preds(gbc, X_train, y_train, X_test)
+    oof_valid_etc, oof_test_etc = get_base_model_preds(etc, X_train, y_train, X_test)
+    oof_valid_xgbc1, oof_test_xgbc1 = get_base_model_preds(xgbc1, X_train, y_train, X_test)
+    oof_valid_knn1, oof_test_knn1 = get_base_model_preds(knn1, X_train, y_train, X_test)
+    oof_valid_knn2, oof_test_knn2 = get_base_model_preds(knn2, X_train, y_train, X_test)
+    oof_valid_knn3, oof_test_knn3 = get_base_model_preds(knn3, X_train, y_train, X_test)
+    oof_valid_knn4, oof_test_knn4 = get_base_model_preds(knn4, X_train, y_train, X_test)
+    X_train_base = np.concatenate([oof_valid_rfc.reshape(-1, 1), 
+                               oof_valid_gbc.reshape(-1, 1), 
+                               oof_valid_etc.reshape(-1, 1), 
+                               oof_valid_xgbc1.reshape(-1, 1), 
+                               oof_valid_knn1.reshape(-1, 1), 
+                               oof_valid_knn2.reshape(-1, 1), 
+                               oof_valid_knn3.reshape(-1, 1), 
+                               oof_valid_knn4.reshape(-1, 1), 
+                              ], axis=1)
+    X_test_base = np.concatenate([oof_test_rfc.reshape(-1, 1), 
+                              oof_test_gbc.reshape(-1, 1), 
+                              oof_test_etc.reshape(-1, 1), 
+                              oof_test_xgbc1.reshape(-1, 1), 
+                              oof_test_knn1.reshape(-1, 1), 
+                              oof_test_knn2.reshape(-1, 1), 
+                              oof_test_knn3.reshape(-1, 1), 
+                              oof_test_knn4.reshape(-1, 1), 
+                             ], axis=1)
+    xgbc2.fit(X_train_base, y_train)
+    pre = xgbc2.predict(X_test_base)
+    ''''train_data = MyDataset(torch.FloatTensor(X_train_base.values), torch.FloatTensor(y_train.values))
+#test_data = MyDataset(torch.FloatTensor(test.values.astype(np.float32)))
+    train_loader = DataLoader(dataset=train_data, batch_size=2048, shuffle=True)
+
+    model = Net()
+
+# 損失関数と最適化手法の定義
+    criterion = nn.L1Loss()
+    optimizer = torch.optim.Adam(model.parameters(), lr= 0.01)
+
+# 学習
+    for epoch in range(2):
+        for i, (inputs, labels) in enumerate(train_loader):
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+    pre=pred(torch.tensor(X_test_base.fillna(0.0).values,dtype=torch.float32),model)
+    sample_prediction['target'] =pre
+    env.predict(sample_prediction)'''
