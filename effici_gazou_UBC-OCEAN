@@ -26,3 +26,230 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 %matplotlib inline
 from sklearn.preprocessing import LabelEncoder
+ROOT_DIR = '/kaggle/input/UBC-OCEAN/'
+DATA_DIR='/kaggle/input/UBC-OCEAN/'
+MODEL_DIR = '/kaggle/working/'
+CSV_SAVE_DIR = '/kaggle/working/'
+IMG_SAVE_DIR = '/kaggle/working/' 
+RUN_EDA = True
+DATASET_TILES = "/kaggle/input/ubc-ocean-tiles-w-masks-2048px-scale-0-25/"
+DATASET_IMAGES = os.path.join(DATASET_TILES, "train_images")
+# PyTorch variables
+SEED = 42
+NUM_CLASSES = 5 
+NUM_WORKERS = 2
+BATCH_SIZE = 8
+LR = 0.0001
+
+RUN_EDA = True
+RUN_TRAINING = True
+TRAIN_ALL = False # If true, train with all data and output a single model. If False, run cross-validation and output multiple models.
+FOLD_NUM = 3 # For cross-validation
+EPOCHS = 5 # Training cycle
+RUN_INFERENCE = False
+
+df = pd.read_csv(DATA_DIR + 'train.csv')
+print(df['label'].value_counts())
+df.head()
+
+def load_img(path):
+    img_bgr = cv2.imread(path)
+    if img_bgr is None:
+        print(f"Error: Failed to load image at {path}")
+        # ここでエラーハンドリングを行うか、またはエラーを上位に伝播させます
+        return None
+    img_rgb = img_bgr[:, :, ::-1]
+    return img_rgb
+
+def transform_train():
+    transform = [
+        A.Resize(512,512,p=1),
+        A.HorizontalFlip(p=0.5),
+        A.ShiftScaleRotate(p=0.5),
+        A.CoarseDropout(p=0.5),
+        ToTensorV2(p=1.0)
+    ]
+    return A.Compose(transform)
+
+
+# Validation (and test) images should only be resized.
+def transform_valid():
+    transform = [
+        A.Resize(512,512,p=1),
+        ToTensorV2(p=1.0)
+    ]
+    return A.Compose(transform)
+
+class CassavaDataset(Dataset):
+    def __init__(self, df, data_root, transforms=None, give_label=True):
+        """Performed only once when the Dataset object is instantiated.
+        give_label should be False for test data
+        """ 
+        super().__init__()
+        self.df = df.reset_index(drop=True).copy()
+        self.data_root = data_root
+        self.transforms = transforms
+        self.give_label = give_label
+        
+        if give_label == True:
+            self.labels = self.df['label'].values
+
+    def __len__(self):
+        """Function to return the number of records in the dataset
+        """ 
+        return self.df.shape[0]
+    
+    def __getitem__(self, index):
+        """Function to return samples corresponding to a given index from a dataset
+        """ 
+        # get labels
+        if self.give_label:
+            target = self.labels[index]
+
+        # Load images
+        img  = load_img(f'{self.data_root}/{self.df.loc[index]["image_id"]}'+'_thumbnail.png').astype(np.float32)
+        # img /= 255.0 # Normalization
+
+        # Transform images
+        if self.transforms:
+            img = self.transforms(image=img)['image']
+
+        if self.give_label == True:
+            return img, target
+        else:
+            return img
+
+def create_dataloader(df, trn_idx, val_idx):
+    train_ = df.loc[trn_idx,:].reset_index(drop=True)
+    valid_ = df.loc[val_idx,:].reset_index(drop=True)
+
+    # Dataset
+    train_datasets = CassavaDataset(train_, DATA_DIR+'train_thumbnails', transforms=transform_train())
+    valid_datasets = CassavaDataset(valid_, DATA_DIR+'train_thumbnails', transforms=transform_valid())
+
+    # Data Loader
+    train_loader = DataLoader(train_datasets, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=True, multiprocessing_context='fork')
+    valid_loader = DataLoader(valid_datasets, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=False, multiprocessing_context='fork')
+
+    return train_loader, valid_loader
+
+class EfficientNet_V2(nn.Module):
+    def __init__(self, n_out):
+        super(EfficientNet_V2, self).__init__()
+        # Define model
+        self.effnet = timm.create_model('tf_efficientnetv2_s_in21ft1k', pretrained=True, num_classes=n_out)
+
+    def forward(self, x):
+        return self.effnet(x)
+
+if RUN_TRAINING and (TRAIN_ALL == False):
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
+    print(f'Using {device} device')
+    
+    # Cross-validation
+    folds = StratifiedKFold(n_splits=FOLD_NUM, shuffle=True, random_state=SEED)\
+            .split(np.arange(df.shape[0]), df['label'].to_numpy())
+
+    # For Visualization
+    train_acc_list = []
+    valid_acc_list = []
+    train_loss_list = []
+    valid_loss_list = []
+
+
+    for fold, (trn_idx, val_idx) in enumerate(folds):
+        print(f'==========Cross Validation Fold {fold+1}==========')
+        
+        # Load Data
+        train_loader, valid_loader = create_dataloader(df, trn_idx, val_idx)
+        # Load model, loss function, and optimizing algorithm
+        model = EfficientNet_V2(NUM_CLASSES).to(device)
+        loss_fn = nn.CrossEntropyLoss().to(device)
+        optimizer = optim.Adam(model.parameters(), lr=LR)
+                
+        # For Visualization
+        train_accs = []
+        valid_accs = []
+        train_losses = []
+        valid_losses = []
+
+        # Start training
+        best_acc = 0
+        for epoch in range(EPOCHS):
+            time_start = time.time()
+            print(f'==========Epoch {epoch+1} Start Training==========')
+            model.train()
+            
+            epoch_loss = 0
+            epoch_accuracy = 0
+        
+            pbar = tqdm(enumerate(train_loader), total=len(train_loader))
+            for step, (img, label) in pbar:            #gfgfgffgfgfjssssssssssss
+                img = img.to(device).float()
+                print(len(label))
+                #label = label.to(device).long()
+                encoder = LabelEncoder()
+                encoded_labels = encoder.fit_transform(label)
+                label = torch.tensor(encoded_labels).to(device).long()
+
+                output = model(img)
+                loss = loss_fn(output, label)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                acc = (output.argmax(dim=1) == label).float().mean()
+                epoch_accuracy += acc / len(train_loader)
+                epoch_loss += loss / len(train_loader)
+
+            print(f'==========Epoch {epoch+1} Start Validation==========')
+            with torch.no_grad():
+                epoch_val_accuracy = 0
+                epoch_val_loss = 0
+                val_labels = []
+                val_preds = []
+
+                pbar = tqdm(enumerate(valid_loader), total=len(valid_loader))
+                for step, (img, label) in pbar:
+                    img = img.to(device).float()
+                    label = label.to(device).long()
+
+                    val_output = model(img)
+                    val_loss = loss_fn(val_output, label)
+
+                    acc = (val_output.argmax(dim=1) == label).float().mean()
+                    epoch_val_accuracy += acc / len(valid_loader)
+                    epoch_val_loss += val_loss / len(valid_loader)
+
+                    val_labels += [label.detach().cpu().numpy()]
+                    val_preds += [torch.argmax(val_output, 1).detach().cpu().numpy()]
+                
+                val_labels = np.concatenate(val_labels)
+                val_preds = np.concatenate(val_preds)
+            
+            # print result from this epoch
+            exec_t = int((time.time() - time_start)/60)
+            print(
+                f'Epoch : {epoch+1} - loss : {epoch_loss:.4f} - acc: {epoch_accuracy:.4f} - val_loss : {epoch_val_loss:.4f} - val_acc: {epoch_val_accuracy:.4f} / Exec time {exec_t} min\n'
+            )
+
+            # For visualization
+            train_accs.append(epoch_accuracy.cpu().numpy())
+            valid_accs.append(epoch_val_accuracy.cpu().numpy())
+            train_losses.append(epoch_loss.detach().cpu().numpy())
+            valid_losses.append(epoch_val_loss.detach().cpu().numpy())
+        
+        train_acc_list.append(train_accs)
+        valid_acc_list.append(valid_accs)
+        train_loss_list.append(train_losses)
+        valid_loss_list.append(valid_losses)
+        del model, optimizer, train_loader, valid_loader, train_accs, valid_accs, train_losses, valid_losses
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    show_validation_score(train_acc_list, train_loss_list, valid_acc_list, valid_loss_list)
+
+else:
+    print('Cross validation is not performed')
