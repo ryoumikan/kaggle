@@ -1,0 +1,41 @@
+test = pd.read_csv('/kaggle/input/llm-detect-ai-generated-text/test_essays.csv')
+df1 = pd.read_csv('/kaggle/input/daigt-proper-train-dataset/train_drcat_01.csv')
+df2 = pd.read_csv('/kaggle/input/daigt-proper-train-dataset/train_drcat_02.csv')
+df1a = df1[['text','label']]
+df2a = df2[['text','label']]
+df= pd.concat([df1a,df2a])
+X_test=test['text']
+nan_count = df["label"].isna().sum()
+df = df.dropna()
+
+# nanの個数を表示します。
+print(df['label'].value_counts())
+print(df.shape)
+print(test.shape)
+
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import accuracy_score
+
+# データフレーム(df)から特徴量と目的変数を取り出す
+X = df['text']
+y = df['label']
+
+# データを訓練セットとテストセットに分割
+#X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# テキストを数値表現に変換
+vectorizer = CountVectorizer()
+X_train_vec = vectorizer.fit_transform(X)
+X_test_vec = vectorizer.transform(X_test)
+#X_test_vec= vectorizer.transform(X_test)
+# ナイーブベイズ分類器を訓練
+clf = MultinomialNB()
+clf.fit(X_train_vec, y)
+
+# テストデータで予測し、精度を計算
+y_pred_proba = clf.predict_proba(X_test_vec)
+print(X_test_vec.shape)
+print(y_pred_proba.shape)
+print(y_pred_proba[:,1])
