@@ -1,0 +1,13 @@
+from datasets import load_dataset
+import pandas as pd
+from transformers import DebertaTokenizer, DebertaForSequenceClassification
+from torch.utils.data import DataLoader
+import torch
+import os
+from scipy.special import softmax
+from sklearn.metrics import roc_auc_score
+os.environ['WANDB_DISABLED']='true'
+train_df = pd.read_csv("/kaggle/input/daigt-proper-train-dataset/train_drcat_01.csv")
+validation_df = pd.read_csv("/kaggle/input/daigt-proper-train-dataset/train_drcat_02.csv")
+test_df = pd.read_csv("/kaggle/input/llm-detect-ai-generated-text/test_essays.csv")
+sample= pd.read_csv('/kaggle/input/llm-detect-ai-generated-text/sample_submission.csv')
